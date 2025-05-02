@@ -2,6 +2,37 @@
   "expo": {
     "name": "HakbangQuest",
     "slug": "HakbangQuest",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "assetBundlePatterns": [
+      "**/*",
+      "assets/fonts/*"
+    ],
+    "android": {
+      "package": "com.hakbangquest",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyCFE6SuCoD7LQftBLIN34ChHr-F2gnyaEI"
+        }
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.hakbangquest",
+      "config": {
+        "googleMapsApiKey": "AIzaSyCFE6SuCoD7LQftBLIN34ChHr-F2gnyaEI"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a74f26e2-cc0c-4544-b860-af2692a8c3f8"
+      }
+    },
+    "plugins": [
+      "expo-font"
+    ]
   }
 }

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "233499329364",
+    "project_id": "hakbangquest-c6093",
+    "storage_bucket": "hakbangquest-c6093.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:233499329364:android:f6bcbe0557c2c972e67ec1",
+        "android_client_info": {
+          "package_name": "com.group10.hakbangquest"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA57XnLQz2HUXXB_EAjVMiK_i3xDAJp_NE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
