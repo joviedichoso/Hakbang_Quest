@@ -150,14 +150,14 @@ const LoginScreen = ({ navigateToLanding, navigateToSignUp, navigateToDashboard,
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={twrnc`flex-1 bg-[#121826] p-5`}>
+    <KeyboardAvoidingView behavior={Platform.OS === 'andriod' ? 'padding' : 'height'} style={twrnc`flex-1 bg-[#121826] p-5`}>
       <ScrollView contentContainerStyle={twrnc`flex-grow`} keyboardShouldPersistTaps="handled">
         <TouchableOpacity style={twrnc`self-start p-2`} onPress={navigateToLanding}>
           <CustomText style={twrnc`text-white text-xl`}>✕</CustomText>
         </TouchableOpacity>
 
         <View style={twrnc`flex-1 pt-10`}>
-          <CustomText weight="bold" style={twrnc`text-5xl text-white mb-2`}>
+          <CustomText weight="bold" style={twrnc`text-5xl text-white mb-2 leading-[60px]`}>
             Sign in
           </CustomText>
           <CustomText style={twrnc`text-sm text-[#8E8E93] mb-6`}>
@@ -167,20 +167,17 @@ const LoginScreen = ({ navigateToLanding, navigateToSignUp, navigateToDashboard,
           {registeredEmails.length > 0 && (
             <View style={twrnc`mb-4`}>
               <CustomText style={twrnc`text-white mb-2`}>Registered Accounts</CustomText>
-              <FlatList
-                data={registeredEmails}
-                keyExtractor={(item) => item}
-                renderItem={({ item }) => (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {registeredEmails.map((email, index) => (
                   <TouchableOpacity
-                    style={twrnc`bg-[#1E2538] p-3 rounded-lg mb-2`}
-                    onPress={() => handleSelectEmail(item)}
+                    key={index}
+                    style={twrnc`bg-[#1E2538] p-3 rounded-lg mr-2`}
+                    onPress={() => handleSelectEmail(email)}
                   >
-                    <CustomText style={twrnc`text-white`}>{item}</CustomText>
+                    <CustomText style={twrnc`text-white`}>{email}</CustomText>
                   </TouchableOpacity>
-                )}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-              />
+                ))}
+              </ScrollView>
             </View>
           )}
 

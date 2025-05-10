@@ -4,6 +4,8 @@ import { FontAwesome } from '@expo/vector-icons';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import twrnc from 'twrnc';
 import CustomText from '../components/CustomText';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../firebaseConfig';
 
 // Import icons
 import WalkingIcon from '../components/icons/walking.png';
@@ -27,6 +29,9 @@ const ActivityScreen = ({ navigateToDashboard, navigateToMap, params = {} }) => 
       avgSpeed: 0,
     }
   );
+
+  const [challenges, setChallenges] = useState([]);
+  const [challengeLoading, setChallengeLoading] = useState(true);
 
   const activities = [
     { id: 'walking', name: 'Walking', icon: WalkingIcon, met: 3.5, color: '#4361EE', iconColor: '#FFFFFF' },
@@ -58,6 +63,26 @@ const ActivityScreen = ({ navigateToDashboard, navigateToMap, params = {} }) => 
       setDistance(calculateTargetDistance());
     }
   }, [selectedActivity, time]);
+
+  useEffect(() => {
+    const fetchChallenges = async () => {
+      try {
+        const challengesRef = collection(db, 'challenges');
+        const challengesSnapshot = await getDocs(challengesRef);
+        const challengesData = challengesSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setChallenges(challengesData);
+        setChallengeLoading(false);
+      } catch (err) {
+        console.error('Error fetching challenges:', err);
+        setChallengeLoading(false);
+      }
+    };
+
+    fetchChallenges();
+  }, []);
 
   const handleDistanceChange = (value) => {
     if (/^\d*\.?\d{0,2}$/.test(value) || value === '') {
@@ -103,11 +128,9 @@ const ActivityScreen = ({ navigateToDashboard, navigateToMap, params = {} }) => 
   return (
     <View style={twrnc`flex-1 bg-[#121826]`}>
       <View style={twrnc`flex-row items-center p-5 bg-[#121826] border-b border-[#2A2E3A]`}>
-        {/* Back Button */}
         <TouchableOpacity style={twrnc`mr-4 z-10`} onPress={navigateToDashboard}>
           <Icon name="angle-left" size={28} color="#FFFFFF" />
         </TouchableOpacity>
-        {/* Centered Activity Name */}
         <View style={twrnc`absolute left-0 right-0 items-center justify-center p-5`}>
           <CustomText weight="semibold" style={twrnc`text-white text-xl`}>
             {activities.find((a) => a.id === selectedActivity)?.name || 'Activity'}
@@ -116,6 +139,7 @@ const ActivityScreen = ({ navigateToDashboard, navigateToMap, params = {} }) => 
       </View>
 
       <ScrollView contentContainerStyle={twrnc`p-5 pb-20`} style={twrnc`flex-1`}>
+        {/* Activity Selection */}
         <View style={twrnc`mb-6`}>
           <CustomText weight="semibold" style={twrnc`text-white text-lg mb-3`}>
             Select Activity
@@ -152,39 +176,68 @@ const ActivityScreen = ({ navigateToDashboard, navigateToMap, params = {} }) => 
           </View>
         </View>
 
+        {/* Challenges Section */}
         <View style={twrnc`mb-6`}>
           <CustomText weight="semibold" style={twrnc`text-white text-lg mb-3`}>
-            Activity Plan
+            Challenges
           </CustomText>
-          <View
-            style={[
-              twrnc`rounded-xl p-4 flex-row items-center`,
-              { backgroundColor: activities.find((a) => a.id === selectedActivity)?.color || '#4361EE' },
-            ]}
-          >
-            <View style={twrnc`bg-white bg-opacity-20 rounded-lg p-3 mr-3`}>
-              <Image
-                source={activities.find((a) => a.id === selectedActivity)?.icon || WalkingIcon}
-                style={twrnc`w-6 h-6`}
-                resizeMode="contain"
-              />
-            </View>
-            <View style={twrnc`flex-1`}>
-              <CustomText weight="semibold" style={twrnc`text-white text-base`}>
-                {activities.find((a) => a.id === selectedActivity)?.name || 'Activity'}
-              </CustomText>
-              <CustomText style={twrnc`text-white text-opacity-80 text-sm`}>
-                Target: {distance} km | {time} min | {calories} kcal
-              </CustomText>
-            </View>
-          </View>
+          {challengeLoading ? (
+            <ActivityIndicator size="large" color="#FFFFFF" />
+          ) : (
+            challenges.map((challenge) => {
+              const progress = Math.min(
+                (challenge.unit === 'steps'
+                  ? stats.steps
+                  : parseFloat(distance)) / challenge.goal,
+                1
+              );
+
+              return (
+                <View
+                  key={challenge.id}
+                  style={twrnc`bg-[#2A2E3A] rounded-xl p-4 mb-4`}
+                >
+                  <View style={twrnc`flex-row justify-between items-center mb-2`}>
+                    <CustomText weight="bold" style={twrnc`text-white text-base`}>
+                      {challenge.title}
+                    </CustomText>
+                    <CustomText style={twrnc`text-[#FFC107] text-sm`}>
+                      {Math.round(progress * 100)}%
+                    </CustomText>
+                  </View>
+                  <CustomText style={twrnc`text-gray-400 text-sm mb-2`}>
+                    {challenge.description}
+                  </CustomText>
+                  <View style={twrnc`h-2 bg-[#3A3F4B] rounded-full`}>
+                    <View
+                      style={[
+                        twrnc`h-2 rounded-full`,
+                        {
+                          width: `${progress * 100}%`,
+                          backgroundColor: progress >= 1 ? '#4CAF50' : '#FFC107',
+                        },
+                      ]}
+                    />
+                  </View>
+                  <CustomText
+                    style={twrnc`text-xs text-gray-400 mt-2`}
+                  >
+                    {challenge.unit === 'steps'
+                      ? `${Math.min(stats.steps, challenge.goal)}/${challenge.goal} steps`
+                      : `${Math.min(parseFloat(distance), challenge.goal).toFixed(2)}/${challenge.goal} km`}
+                  </CustomText>
+                </View>
+              );
+            })
+          )}
         </View>
 
+        {/* Activity Settings */}
         <View style={twrnc`mb-6`}>
           <CustomText weight="semibold" style={twrnc`text-white text-lg mb-3`}>
             Activity Settings
           </CustomText>
-
+          {/* Distance Input */}
           <View style={twrnc`bg-[#2A2E3A] rounded-xl mb-3`}>
             <View style={twrnc`flex-row justify-between items-center p-4`}>
               <CustomText style={twrnc`text-white`}>Distance (km)</CustomText>
@@ -199,6 +252,7 @@ const ActivityScreen = ({ navigateToDashboard, navigateToMap, params = {} }) => 
             </View>
           </View>
 
+          {/* Duration Input */}
           <View style={twrnc`bg-[#2A2E3A] rounded-xl mb-3 p-4`}>
             <CustomText style={twrnc`text-white mb-3`}>Duration (minutes)</CustomText>
             <View style={twrnc`flex-row flex-wrap justify-between`}>
@@ -222,6 +276,7 @@ const ActivityScreen = ({ navigateToDashboard, navigateToMap, params = {} }) => 
             </View>
           </View>
 
+          {/* GPS Tracking */}
           <View style={twrnc`bg-[#2A2E3A] rounded-xl mb-3`}>
             <View style={twrnc`flex-row justify-between items-center p-4`}>
               <View style={twrnc`flex-row items-center`}>
@@ -238,6 +293,7 @@ const ActivityScreen = ({ navigateToDashboard, navigateToMap, params = {} }) => 
             </View>
           </View>
 
+          {/* Auto-Pause */}
           <View style={twrnc`bg-[#2A2E3A] rounded-xl`}>
             <View style={twrnc`flex-row justify-between items-center p-4`}>
               <View style={twrnc`flex-row items-center`}>
@@ -255,6 +311,7 @@ const ActivityScreen = ({ navigateToDashboard, navigateToMap, params = {} }) => 
           </View>
         </View>
 
+        {/* Start/Resume Activity */}
         <View style={twrnc`mt-4`}>
           {coordinates.length > 0 ? (
             <>

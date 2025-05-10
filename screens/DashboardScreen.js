@@ -54,9 +54,9 @@ const calculateMapRegion = (coordinates) => {
 // Utility to get the current week's dates
 const getWeekDates = () => {
   const today = new Date();
-  const dayOfWeek = today.getDay(); // 0 (Sunday) to 6 (Saturday)
+  const dayOfWeek = today.getDay();
   const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - dayOfWeek); // Set to Sunday
+  startOfWeek.setDate(today.getDate() - dayOfWeek);
 
   const weekDates = [];
   for (let i = 0; i < 7; i++) {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { SafeAreaView, StatusBar, View, TouchableOpacity, Image, Alert, Dimensions, Linking } from 'react-native';
+import { SafeAreaView, StatusBar, View, TouchableOpacity, Image, Dimensions, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
@@ -42,18 +42,21 @@ const requestLocationPermissions = async () => {
     if (status === 'granted') return true;
 
     if (!canAskAgain) {
-      Alert.alert('Permission Required', 'Location permissions are required. Please enable them in app settings.', [
-        { text: 'Cancel' },
-        { text: 'Open Settings', onPress: () => Linking.openSettings() }
-      ]);
+      setModalTitle('Permission Required');
+      setModalMessage('Location permissions are required. Please enable them in app settings.');
+      setModalVisible(true);
       return false;
     }
 
-    Alert.alert('Permission Required', 'This app needs location permissions to work properly.', [{ text: 'OK' }]);
+    setModalTitle('Permission Required');
+    setModalMessage('This app needs location permissions to work properly.');
+    setModalVisible(true);
     return false;
   } catch (error) {
     console.error('Error requesting location permissions:', error);
-    Alert.alert('Error', 'Failed to request location permissions');
+    setModalTitle('Error');
+    setModalMessage('Failed to request location permissions.');
+    setModalVisible(true);
     return false;
   }
 };
@@ -64,6 +67,9 @@ const checkLocationPermissions = async () => {
     return granted;
   } catch (error) {
     console.error('Error checking location permissions:', error);
+    setModalTitle('Error');
+    setModalMessage('Failed to check location permissions.');
+    setModalVisible(true);
     return false;
   }
 };
@@ -108,7 +114,6 @@ export default function App() {
         }
 
         if (user.emailVerified) {
-          // Only navigate to dashboard if coming from landing, signin, or signup
           if (['landing', 'signin', 'signup'].includes(activeScreen)) {
             setActiveScreen('dashboard');
           }
@@ -170,14 +175,9 @@ export default function App() {
 
   const navigateToMap = (params = {}) => {
     if (!locationGranted) {
-      Alert.alert(
-        'Location Required',
-        'Please enable location services to use this feature',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: () => Linking.openSettings() },
-        ]
-      );
+      setModalTitle('Location Required');
+      setModalMessage('Please enable location services to use this feature.');
+      setModalVisible(true);
       return;
     }
     setActivityParams(params);
@@ -225,7 +225,10 @@ export default function App() {
 
   return (
     <SafeAreaView style={twrnc`flex-1 bg-[#121826]`} onLayout={onLayoutRootView}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar
+        barStyle={Platform.OS === 'android' ? 'light-content' : 'dark-content'}
+        backgroundColor="#121826" // Match your app's background color
+      />
 
       {!locationGranted && (
         <View style={twrnc`bg-yellow-600 p-2`}>
@@ -242,7 +245,7 @@ export default function App() {
         onClose={() => {
           setModalVisible(false);
           setIsNavigationLocked(false);
-          navigateToSignIn(); // Navigate to SignIn after closing modal
+          navigateToSignIn(); 
         }}
       />
 

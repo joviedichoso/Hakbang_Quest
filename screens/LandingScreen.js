@@ -5,7 +5,8 @@ import CustomText from '../components/CustomText';
 
 const LandingScreen = ({ navigateToSignIn, navigateToSignUp }) => {
     const [isLoading, setIsLoading] = useState(true);
-    const [buttonLoading, setButtonLoading] = useState(false);
+    const [signupLoading, setSignupLoading] = useState(false); // Separate state for "Get Started"
+    const [signinLoading, setSigninLoading] = useState(false); // Separate state for "Sign In"
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -16,15 +17,19 @@ const LandingScreen = ({ navigateToSignIn, navigateToSignUp }) => {
     }, []);
 
     const handleNavigate = (type) => {
-        setButtonLoading(true);
-        setTimeout(() => {
-            setButtonLoading(false);
-            if (type === 'signup') {
+        if (type === 'signup') {
+            setSignupLoading(true);
+            setTimeout(() => {
+                setSignupLoading(false);
                 navigateToSignUp();
-            } else {
+            }, 2000);
+        } else if (type === 'signin') {
+            setSigninLoading(true);
+            setTimeout(() => {
+                setSigninLoading(false);
                 navigateToSignIn();
-            }
-        }, 2000); 
+            }, 2000);
+        }
     };
 
     return (
@@ -53,12 +58,13 @@ const LandingScreen = ({ navigateToSignIn, navigateToSignUp }) => {
                         </View>
 
                         <View style={twrnc`items-center`}>
+                            {/* Get Started Button */}
                             <TouchableOpacity
                                 style={twrnc`bg-[#4361EE] py-4 rounded-lg w-full items-center mb-4`}
                                 onPress={() => handleNavigate('signup')}
-                                disabled={buttonLoading}
+                                disabled={signupLoading || signinLoading} // Disable both buttons while loading
                             >
-                                {buttonLoading ? (
+                                {signupLoading ? (
                                     <ActivityIndicator color="#fff" />
                                 ) : (
                                     <CustomText
@@ -70,12 +76,16 @@ const LandingScreen = ({ navigateToSignIn, navigateToSignUp }) => {
                                 )}
                             </TouchableOpacity>
 
+                            {/* Sign In Button */}
                             <View style={twrnc`flex-row items-center`}>
                                 <CustomText style={twrnc`text-white opacity-80`}>
                                     Already have an account?{' '}
                                 </CustomText>
-                                <TouchableOpacity onPress={() => handleNavigate('signin')} disabled={buttonLoading}>
-                                    {buttonLoading ? (
+                                <TouchableOpacity
+                                    onPress={() => handleNavigate('signin')}
+                                    disabled={signinLoading || signupLoading} // Disable both buttons while loading
+                                >
+                                    {signinLoading ? (
                                         <ActivityIndicator color="#FEC949" />
                                     ) : (
                                         <CustomText

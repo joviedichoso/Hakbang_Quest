@@ -122,7 +122,7 @@ const SignupScreen = ({ navigateToLanding, navigateToSignIn, setIsInSignupFlow, 
         </TouchableOpacity>
 
         <View style={twrnc`flex-1 pt-10`}>
-          <CustomText weight="bold" style={twrnc`text-5xl text-white mb-2`}>
+          <CustomText weight="bold" style={twrnc`text-5xl text-white mb-2 leading-[60px]`}>
             Sign up
           </CustomText>
           <CustomText style={twrnc`text-sm text-[#8E8E93] mb-6`}>
