@@ -87,7 +87,7 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.hakbangquest"
+    namespace 'com.hakbangquest'
     defaultConfig {
         applicationId 'com.hakbangquest'
         minSdkVersion rootProject.ext.minSdkVersion
