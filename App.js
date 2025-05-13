@@ -8,7 +8,7 @@ import twrnc from 'twrnc';
 import { FontAwesome } from '@expo/vector-icons';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from './firebaseConfig'; 
+import { auth, db } from './firebaseConfig';
 
 import LandingScreen from './screens/LandingScreen';
 import LoginScreen from './screens/LoginScreen';
@@ -16,10 +16,11 @@ import SignupScreen from './screens/SignupScreen';
 import DashboardScreen from './screens/DashboardScreen';
 import ActivityScreen from './screens/ActivityScreen';
 import ProfileScreen from './screens/ProfileScreen';
+import CommunityScreen from './screens/CommunityScreen';
 import LeaderboardScreen from './screens/LeaderboardScreen';
 import MapScreen from './screens/MapScreen';
 import CustomText from './components/CustomText';
-import CustomModal from './components/CustomModal'; 
+import CustomModal from './components/CustomModal';
 
 import RunningIcon from './components/icons/running.png';
 import FootprintsIcon from './components/icons/footprints.png';
@@ -85,7 +86,7 @@ export default function App() {
     'Poppins-SemiBold': require('./assets/fonts/Poppins-SemiBold.ttf'),
     'Poppins-Bold': require('./assets/fonts/Poppins-Bold.ttf'),
   });
-  
+
   const [isNavigationLocked, setIsNavigationLocked] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
@@ -93,7 +94,7 @@ export default function App() {
   const [verificationModalShown, setVerificationModalShown] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
 
-  
+
 
 
   const handleAuthStateChange = useCallback(async (user) => {
@@ -215,10 +216,10 @@ export default function App() {
 
   const getTimeBasedGreeting = () => {
     const hour = new Date().getHours();
-    if (hour < 12) return 'Good Morning';
-    if (hour < 17) return 'Good Afternoon';
-    if (hour < 20) return 'Good Evening';
-    return 'Good Night';
+    if (hour < 12) return 'Good Morning! Let’s start the day strong!';
+    if (hour < 17) return 'Good Afternoon! Keep up the great work!';
+    if (hour < 20) return 'Good Evening! You’re doing awesome!';
+    return 'Good Night! But if you’re up for it, keep pushing your limits tonight!';
   };
 
   if (!fontsLoaded) return null;
@@ -227,7 +228,7 @@ export default function App() {
     <SafeAreaView style={twrnc`flex-1 bg-[#121826]`} onLayout={onLayoutRootView}>
       <StatusBar
         barStyle={Platform.OS === 'android' ? 'light-content' : 'dark-content'}
-        backgroundColor="#121826" // Match your app's background color
+        backgroundColor="#121826"
       />
 
       {!locationGranted && (
@@ -245,7 +246,7 @@ export default function App() {
         onClose={() => {
           setModalVisible(false);
           setIsNavigationLocked(false);
-          navigateToSignIn(); 
+          navigateToSignIn();
         }}
       />
 
@@ -258,7 +259,7 @@ export default function App() {
                 <CustomText
                   weight="bold"
                   style={twrnc`text-white ${isSmallDevice ? 'text-xl' : 'text-2xl'} flex-shrink-1`}
-                  numberOfLines={1}
+                  numberOfLines={null}
                   ellipsizeMode="tail"
                 >
                   {getTimeBasedGreeting()}, {userName}!
@@ -318,6 +319,10 @@ export default function App() {
           navigateToDashboard={navigateToDashboard}
           navigateToLanding={navigateToLanding}
         />
+      )}
+
+      {activeScreen === 'community' && (
+        <CommunityScreen navigateToDashboard={navigateToDashboard} />
       )}
 
       {activeScreen === 'Leaderboard' && (
@@ -391,15 +396,16 @@ export default function App() {
             />
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={() => setActiveScreen('profile')} style={twrnc`items-center`}>
+          <TouchableOpacity onPress={() => setActiveScreen('community')} style={twrnc`items-center`}>
             <FontAwesome
-              name="user"
+              name="users"
               size={30}
-              color={activeScreen === 'profile' ? '#FFC107' : '#FFFFFF'}
+              color={activeScreen === 'community' ? '#FFC107' : '#FFFFFF'}
             />
           </TouchableOpacity>
-        </View>
-      )}
-    </SafeAreaView>
+        </View >
+      )
+      }
+    </SafeAreaView >
   );
 }

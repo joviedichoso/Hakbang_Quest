@@ -3,11 +3,16 @@
     "name": "HakbangQuest",
     "slug": "HakbangQuest",
     "version": "1.0.0",
+    "icon": "./assets/image/icon.png",
     "assetBundlePatterns": [
       "**/*",
       "assets/fonts/*"
     ],
     "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/image/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
       "hermes": false,
       "package": "com.hakbangquest",
       "permissions": [
@@ -35,6 +40,11 @@
     "plugins": [
       "expo-font",
       "expo-web-browser"
-    ]
+    ],
+    "splash": {
+      "image": "./assets/image/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    }
   }
 }
