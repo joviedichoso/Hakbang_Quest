@@ -3,6 +3,7 @@ import { View, TouchableOpacity, FlatList, ActivityIndicator, Alert } from 'reac
 import twrnc from 'twrnc';
 import CustomText from '../components/CustomText';
 import Icon from 'react-native-vector-icons/FontAwesome';
+
 import { db, auth } from '../firebaseConfig';
 import { collection, query, getDocs } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -29,34 +30,27 @@ const LeaderboardScreen = ({ navigateToDashboard }) => {
         setLoading(false);
       }
     });
-
     return () => unsubscribe();
   }, [navigateToDashboard]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
-
     const fetchLeaderboardData = async () => {
       try {
         setLoading(true);
 
-        // Fetch users (only uid and username)
-        const usersQuery = query(collection(db, 'users'));
-        const usersSnapshot = await getDocs(usersQuery);
+        const usersSnapshot = await getDocs(query(collection(db, 'users')));
         const users = usersSnapshot.docs.map((doc) => ({
           uid: doc.id,
           username: doc.data().username || 'User',
         }));
 
-        // Fetch activities
-        const activitiesQuery = query(collection(db, 'activities'));
-        const activitiesSnapshot = await getDocs(activitiesQuery);
+        const activitiesSnapshot = await getDocs(query(collection(db, 'activities')));
         const userStats = {};
 
         activitiesSnapshot.forEach((doc) => {
           const activity = doc.data();
           const userId = activity.userId;
-
           if (!userStats[userId]) {
             userStats[userId] = {
               totalDistance: 0,
@@ -64,16 +58,11 @@ const LeaderboardScreen = ({ navigateToDashboard }) => {
               longestRun: 0,
             };
           }
-
           userStats[userId].totalDistance += activity.distance || 0;
           userStats[userId].totalActivities += 1;
-          userStats[userId].longestRun = Math.max(
-            userStats[userId].longestRun,
-            activity.distance || 0
-          );
+          userStats[userId].longestRun = Math.max(userStats[userId].longestRun, activity.distance || 0);
         });
 
-        // Combine user data with stats
         const leaderboard = users
           .map((user) => ({
             username: user.username,
@@ -88,25 +77,13 @@ const LeaderboardScreen = ({ navigateToDashboard }) => {
         setLeaderboardData(leaderboard);
       } catch (err) {
         console.error('Error fetching leaderboard data:', err);
-        if (err.code === 'permission-denied') {
-          Alert.alert(
-            'Permission Denied',
-            'Unable to load leaderboard due to insufficient permissions. Please try again or sign in.',
-            [
-              { text: 'Retry', onPress: () => fetchLeaderboardData() },
-              { text: 'Back', onPress: navigateToDashboard },
-            ]
-          );
-        } else {
-          Alert.alert('Error', 'Failed to load leaderboard. Please try again later.', [
-            { text: 'OK', onPress: navigateToDashboard },
-          ]);
-        }
+        Alert.alert('Error', 'Failed to load leaderboard. Please try again later.', [
+          { text: 'OK', onPress: navigateToDashboard },
+        ]);
       } finally {
         setLoading(false);
       }
     };
-
     fetchLeaderboardData();
   }, [isAuthenticated, sortMetric, navigateToDashboard]);
 
@@ -114,52 +91,59 @@ const LeaderboardScreen = ({ navigateToDashboard }) => {
     setSortMetric(metric);
   };
 
-  const renderLeaderboardItem = ({ item, index }) => (
-    <View
-      style={twrnc`flex-row items-center p-4 bg-[#2A2E3A] rounded-xl mb-2 mx-5 border ${
-        index < 3 ? 'border-[#FFC107]' : 'border-[#3A3F4B]'
-      }`}
-    >
-      <View style={twrnc`w-10 items-center`}>
-        <CustomText
-          weight="bold"
-          style={twrnc`text-white text-lg ${
-            index === 0 ? 'text-[#FFD700]' : index === 1 ? 'text-[#C0C0C0]' : index === 2 ? 'text-[#CD7F32]' : ''
-          }`}
+  const renderLeaderboardItem = ({ item, index }) => {
+    const rankColors = ['#FFD700', '#C0C0C0', '#CD7F32'];
+
+    const rankEmoji = index === 0 ? '🏆' : index === 1 ? '🥈' : index === 2 ? '🥉' : '';
+
+    return (
+      <View
+        style={twrnc`flex-row items-center p-4 bg-[#1E222A] rounded-xl shadow-lg mb-3 mx-4 border border-[#3A3F4B]`}
+      >
+        {/* Rank Badge with emoji */}
+        <View
+          style={twrnc`w-14 h-14 items-center justify-center rounded-full bg-gradient-to-tr from-purple-500 to-blue-500 shadow-md`}
         >
-          {index + 1}
-        </CustomText>
+          <CustomText
+            weight="bold"
+            style={twrnc`text-white text-2xl`}
+          >
+            {index < 3 ? (index === 0 ? '🏆' : index === 1 ? '🥈' : '🥉') : `${index + 1}`}
+          </CustomText>
+        </View>
+
+        {/* User Info */}
+        <View style={twrnc`flex-1 ml-4`}>
+          <CustomText style={twrnc`text-white text-lg font-semibold`}>
+            {item.username}
+          </CustomText>
+          <View style={twrnc`mt-1`}>
+            <CustomText style={twrnc`text-gray-400 text-sm`}>
+              Distance: {item.totalDistance.toFixed(1)} km
+            </CustomText>
+            <CustomText style={twrnc`text-gray-400 text-sm`}>
+              Activities: {item.totalActivities}
+            </CustomText>
+            <CustomText style={twrnc`text-gray-400 text-sm`}>
+              Longest Run: {item.longestRun.toFixed(1)} km
+            </CustomText>
+          </View>
+        </View>
+        {/* Medal emoji for top 3 */}
+        {index < 3 && (
+          <CustomText style={twrnc`ml-2 text-2xl`}>
+            {index === 0 ? '🏆' : index === 1 ? '🥈' : '🥉'}
+          </CustomText>
+        )}
       </View>
-      <View style={twrnc`flex-1 ml-4`}>
-        <CustomText weight="semibold" style={twrnc`text-white text-base`}>
-          {item.username}
-        </CustomText>
-        <CustomText style={twrnc`text-gray-400 text-sm`}>
-          Distance: {(item.totalDistance).toFixed(1)} km
-        </CustomText>
-        <CustomText style={twrnc`text-gray-400 text-sm`}>
-          Activities: {item.totalActivities}
-        </CustomText>
-        <CustomText style={twrnc`text-gray-400 text-sm`}>
-          Longest Run: {(item.longestRun).toFixed(1)} km
-        </CustomText>
-      </View>
-      {index < 3 && (
-        <Icon
-          name={index === 0 ? 'trophy' : 'medal'}
-          size={24}
-          color={index === 0 ? '#FFD700' : index === 1 ? '#C0C0C0' : '#CD7F32'}
-        />
-      )}
-    </View>
-  );
+    );
+  };
 
   const renderMetricButton = (metric) => (
     <TouchableOpacity
       key={metric.id}
-      style={twrnc`flex-row items-center bg-[#3A3F4B] rounded-xl px-3 py-2 mx-1 ${
-        sortMetric === metric.id ? 'bg-[#4361EE]' : ''
-      }`}
+      style={twrnc`flex-row items-center bg-[#3A3F4B] rounded-xl px-3 py-2 mx-1 ${sortMetric === metric.id ? 'bg-[#4361EE]' : ''
+        }`}
       onPress={() => handleMetricChange(metric.id)}
     >
       <Icon name={metric.icon} size={16} color="#FFFFFF" style={twrnc`mr-2`} />
@@ -196,11 +180,13 @@ const LeaderboardScreen = ({ navigateToDashboard }) => {
   return (
     <View style={twrnc`flex-1 bg-[#121826]`}>
       {/* Header */}
-      <View style={twrnc`flex-row justify-between items-center px-5 py-4 border-b border-[#3A3F4B]`}>
+      <View
+        style={twrnc`flex-row justify-between items-center px-5 py-4 border-b border-[#3A3F4B]`}
+      >
         <TouchableOpacity onPress={navigateToDashboard}>
           <Icon name="angle-left" size={28} color="#FFFFFF" />
         </TouchableOpacity>
-        <CustomText weight="semibold" style={twrnc`text-white text-lg`}>
+        <CustomText style={twrnc`text-white text-lg font-semibold`}>
           Leaderboard
         </CustomText>
         <View style={twrnc`w-7`} />
@@ -211,7 +197,7 @@ const LeaderboardScreen = ({ navigateToDashboard }) => {
         {metrics.map((metric) => renderMetricButton(metric))}
       </View>
 
-      {/* Leaderboard List */}
+      {/* Leaderboard List or No Data */}
       {leaderboardData.length > 0 ? (
         <FlatList
           data={leaderboardData}
@@ -223,7 +209,7 @@ const LeaderboardScreen = ({ navigateToDashboard }) => {
         <View style={twrnc`flex-1 justify-center items-center px-5`}>
           <Icon name="exclamation-circle" size={48} color="#FFC107" style={twrnc`mb-4`} />
           <CustomText style={twrnc`text-gray-400 text-center`}>
-            No activities found. Start tracking to join the leaderboard!
+            No activities found. Start tracking to join!
           </CustomText>
         </View>
       )}
