@@ -1,27 +1,38 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { View, TouchableOpacity, ActivityIndicator, Platform, AppState, Dimensions, BackHandler } from "react-native"
+import {
+  View,
+  TouchableOpacity,
+  ActivityIndicator,
+  Platform,
+  AppState,
+  Dimensions,
+  BackHandler,
+  Animated,
+  Easing,
+  PanResponder,
+} from "react-native"
 import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from "react-native-maps"
 import * as Location from "expo-location"
-import { Animated, Easing } from "react-native"
 import twrnc from "twrnc"
 import CustomText from "../components/CustomText"
 import CustomModal from "../components/CustomModal"
 import { FontAwesome } from "@expo/vector-icons"
 import Icon from "react-native-vector-icons/FontAwesome"
-import { Ionicons } from '@expo/vector-icons'
-import { calculateDistance, formatTime } from "../utils/activityUtils"
+import { Ionicons } from "@expo/vector-icons"
+// Update the imports to include the new pace calculation functions
+import { calculateDistance, formatTime, calculatePace, formatPace } from "../utils/activityUtils"
 import { db, auth } from "../firebaseConfig"
 import { collection, addDoc, serverTimestamp } from "firebase/firestore"
 import * as Pedometer from "expo-sensors"
 import { generateRoute } from "../utils/routeGenerator"
+import { LinearGradient } from "expo-linear-gradient"
 
-const { width } = Dimensions.get("window")
+const { width, height } = Dimensions.get("window")
 const isAndroid = Platform.OS === "android"
 const isSmallDevice = width < 375
 
-// Default stride lengths in meters based on activity type
 const DEFAULT_STRIDE_LENGTHS = {
   walking: 0.75,
   jogging: 0.9,
@@ -36,12 +47,28 @@ const STEP_CADENCE_ADJUSTMENT = {
   running: 1.35,
 }
 
+// Add these constants near the top of the file, after the other constants
+const MINIMUM_DISTANCE_THRESHOLDS = {
+  walking: 1.5, // 1.5 meters minimum for walking
+  jogging: 2.0, // 2.0 meters minimum for jogging
+  running: 2.5, // 2.5 meters minimum for running
+  cycling: 3.0, // 3.0 meters minimum for cycling
+}
+
+// Add constants for pace smoothing
+const PACE_WINDOW_SIZES = {
+  walking: 5, // Last 5 pace values for walking
+  jogging: 5, // Last 5 pace values for jogging
+  running: 5, // Last 5 pace values for running
+  cycling: 7, // Last 7 pace values for cycling (more smoothing for cycling)
+}
+
 const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => {
   const {
     activityType = "walking",
     activityColor = "#4361EE",
-    targetDistance = "5.00",
-    targetTime = "30",
+    targetDistance = "0",
+    targetTime = "0",
     tracking: initialTracking = false,
     initialCoordinates = [],
     initialStats = { distance: 0, duration: 0, pace: 0, avgSpeed: 0, steps: 0 },
@@ -64,6 +91,25 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
   const [usingEstimatedSteps, setUsingEstimatedSteps] = useState(false)
   const [strideLength, setStrideLength] = useState(userStrideLength || DEFAULT_STRIDE_LENGTHS[activityType])
 
+  // Add this to the component's state variables
+  const [distanceThreshold, setDistanceThreshold] = useState(MINIMUM_DISTANCE_THRESHOLDS[activityType] || 1.5)
+
+  // Add state for smoothed pace
+  const [smoothedPace, setSmoothedPace] = useState(0)
+
+  // Add a ref to store recent pace values for the moving average
+  const recentPacesRef = useRef([])
+
+  // Add a ref for the pace window size based on activity type
+  const paceWindowSizeRef = useRef(PACE_WINDOW_SIZES[activityType] || 5)
+
+  // GPS Signal Indicator position state
+  const [gpsIndicatorPosition, setGpsIndicatorPosition] = useState({
+    x: width - 100, // Initial position from right
+    y: 16, // Initial position from top
+  })
+  const pan = useRef(new Animated.ValueXY({ x: width - 100, y: 16 })).current
+
   // Route generation states
   const [suggestedRoute, setSuggestedRoute] = useState(null)
   const [showSuggestedRoute, setShowSuggestedRoute] = useState(false)
@@ -78,6 +124,10 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
   const iconPulseAnim = useRef(new Animated.Value(1)).current
   const iconMoveAnim = useRef(new Animated.Value(0)).current
   const spinAnim = useRef(new Animated.Value(0)).current
+  const fadeAnim = useRef(new Animated.Value(0)).current
+  const slideAnim = useRef(new Animated.Value(50)).current
+  const statsSlideAnim = useRef(new Animated.Value(100)).current
+  const headerSlideAnim = useRef(new Animated.Value(-50)).current
 
   const mapRef = useRef(null)
   const intervalRef = useRef(null)
@@ -91,6 +141,32 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
   const lastCoordinateForStepsRef = useRef(null)
   const terrainFactorRef = useRef(1.0)
 
+  // Add a ref to store the last coordinate for distance calculations
+  const lastCoordinateRef = useRef(null)
+
+  // Create pan responder for draggable GPS indicator
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        pan.setOffset({
+          x: pan.x._value,
+          y: pan.y._value,
+        })
+      },
+      onPanResponderMove: Animated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
+      onPanResponderRelease: () => {
+        pan.flattenOffset()
+
+        // Update the position state for persistence
+        setGpsIndicatorPosition({
+          x: pan.x._value,
+          y: pan.y._value,
+        })
+      },
+    }),
+  ).current
+
   const locationAccuracy =
     activityType === "running" || activityType === "jogging"
       ? Location.Accuracy.BestForNavigation
@@ -99,14 +175,45 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
   const locationTimeInterval = activityType === "cycling" ? 1000 : 500
 
   const activityConfigs = {
-    walking: { icon: "walk", color: "#4361EE", strokeColor: "#4361EE" },
-    running: { icon: "running", color: "#EF476F", strokeColor: "#EF476F" },
-    cycling: { icon: "bicycle", color: "#06D6A0", strokeColor: "#06D6A0" },
-    jogging: { icon: "running", color: "#FFD166", strokeColor: "#FFD166" },
+    walking: { icon: "walk", color: "#4361EE", strokeColor: "#4361EE", darkColor: "#3651D4" },
+    running: { icon: "running", color: "#EF476F", strokeColor: "#EF476F", darkColor: "#D43E63" },
+    cycling: { icon: "bicycle", color: "#06D6A0", strokeColor: "#06D6A0", darkColor: "#05C090" },
+    jogging: { icon: "running", color: "#FFD166", strokeColor: "#FFD166", darkColor: "#E6BC5C" },
   }
 
   const currentActivity = activityConfigs[activityType] || activityConfigs.walking
   const maxSpeed = activityType === "cycling" ? 20 : 8
+
+  // Add a function to calculate the moving average for pace
+  const calculateMovingAveragePace = (newPace) => {
+    // Don't add invalid pace values to the moving average
+    if (isNaN(newPace) || newPace === 0 || !isFinite(newPace)) {
+      // If we have no valid paces yet, return 0
+      if (recentPacesRef.current.length === 0) {
+        return 0
+      }
+      // Otherwise, return the current average without adding the new value
+      const sum = recentPacesRef.current.reduce((acc, val) => acc + val, 0)
+      return sum / recentPacesRef.current.length
+    }
+
+    // Add the new pace to our array of recent paces
+    recentPacesRef.current.push(newPace)
+
+    // Keep only the most recent N values based on activity type
+    if (recentPacesRef.current.length > paceWindowSizeRef.current) {
+      recentPacesRef.current.shift() // Remove the oldest value
+    }
+
+    // Calculate the average of recent paces
+    const sum = recentPacesRef.current.reduce((acc, val) => acc + val, 0)
+    return sum / recentPacesRef.current.length
+  }
+
+  // Set initial position for the pan animation
+  useEffect(() => {
+    pan.setValue({ x: gpsIndicatorPosition.x, y: gpsIndicatorPosition.y })
+  }, [])
 
   // Calculate stride length based on height if not provided
   useEffect(() => {
@@ -127,9 +234,19 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
           calculatedStride = DEFAULT_STRIDE_LENGTHS[activityType]
       }
       setStrideLength(calculatedStride || DEFAULT_STRIDE_LENGTHS[activityType])
+
+      // Set the appropriate distance threshold based on activity type
+      setDistanceThreshold(MINIMUM_DISTANCE_THRESHOLDS[activityType] || 1.5)
+
+      // Set the appropriate pace window size based on activity type
+      paceWindowSizeRef.current = PACE_WINDOW_SIZES[activityType] || 5
     } else {
       setStrideLength(userStrideLength)
     }
+
+    // Reset the pace history when activity type changes
+    recentPacesRef.current = []
+    setSmoothedPace(0)
   }, [activityType, userHeight, userStrideLength])
 
   // Check pedometer support
@@ -260,7 +377,6 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
     return (currentStats.steps || 0) + segmentSteps
   }
 
-  // Animation functions
   const animateButtonPress = () => {
     Animated.sequence([
       Animated.timing(buttonScaleAnim, {
@@ -325,6 +441,62 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
     ).start()
   }
 
+  const animateScreenElements = () => {
+    // Reset animation values
+    fadeAnim.setValue(0)
+    slideAnim.setValue(50)
+    statsSlideAnim.setValue(100)
+    headerSlideAnim.setValue(-50)
+
+    // Start animations
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 600,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(statsSlideAnim, {
+        toValue: 0,
+        duration: 800,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(headerSlideAnim, {
+        toValue: 0,
+        duration: 500,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start()
+  }
+
+  const animateTrackingTransition = (isStarting) => {
+    // Animate stats panel sliding in/out
+    Animated.timing(statsSlideAnim, {
+      toValue: isStarting ? 0 : 100,
+      duration: 300,
+      easing: Easing.inOut(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      if (!isStarting) {
+        // If stopping, slide back in with updated stats
+        Animated.timing(statsSlideAnim, {
+          toValue: 0,
+          duration: 300,
+          delay: 100,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start()
+      }
+    })
+  }
+
   const stopAnimations = () => {
     iconPulseAnim.stopAnimation()
     iconMoveAnim.stopAnimation()
@@ -337,8 +509,12 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
   useEffect(() => {
     if (tracking) {
       startIconPulseAnimation()
+      animateTrackingTransition(true)
     } else if (!isTrackingLoading) {
       startIconMoveAnimation()
+      if (coordinates.length > 0) {
+        animateTrackingTransition(false)
+      }
     }
     if (isTrackingLoading) {
       startSpinAnimation()
@@ -347,6 +523,13 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
       stopAnimations()
     }
   }, [tracking, isTrackingLoading])
+
+  // Initial animations when screen loads
+  useEffect(() => {
+    if (!loading) {
+      animateScreenElements()
+    }
+  }, [loading])
 
   const spin = spinAnim.interpolate({
     inputRange: [0, 1],
@@ -375,10 +558,31 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
     setModalVisible(true)
   }
 
+  // Replace the calculateMetrics function with this improved version
   const calculateMetrics = (distance, duration) => {
-    const pace = duration > 0 ? duration / (distance / 1000) : 0
-    const avgSpeed = duration > 0 ? distance / 1000 / (duration / 3600) : 0
-    return { pace, avgSpeed }
+    // Ensure we're working with numbers
+    const numDistance = Number(distance)
+    const numDuration = Number(duration)
+
+    // Prevent division by zero and handle invalid inputs
+    // Only calculate pace if we have meaningful distance and duration
+    if (numDistance < 5 || numDuration < 5 || isNaN(numDistance) || isNaN(numDuration)) {
+      return { pace: 0, avgSpeed: 0 }
+    }
+
+    // Calculate pace in minutes per kilometer
+    const rawPace = calculatePace(numDistance, numDuration)
+
+    // Calculate the smoothed pace using the moving average
+    const smoothedPaceValue = calculateMovingAveragePace(rawPace)
+
+    // Update the smoothed pace state
+    setSmoothedPace(smoothedPaceValue)
+
+    // Calculate average speed in km/h
+    const avgSpeed = numDistance / 1000 / (numDuration / 3600)
+
+    return { pace: smoothedPaceValue, rawPace, avgSpeed }
   }
 
   const backAction = () => {
@@ -561,6 +765,7 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
     }
   }
 
+  // Update the startTracking function to properly initialize stats
   const startTracking = async () => {
     animateButtonPress()
     setIsTrackingLoading(true)
@@ -594,25 +799,19 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
         }
       }
 
-      if (followingSuggestedRoute && suggestedRoute) {
-        setCoordinates([
-          {
-            latitude: initialLocation.coords.latitude,
-            longitude: initialLocation.coords.longitude,
-            timestamp: initialLocation.timestamp,
-            accuracy: initialLocation.coords.accuracy,
-          },
-        ])
-      } else {
-        setCoordinates([
-          {
-            latitude: initialLocation.coords.latitude,
-            longitude: initialLocation.coords.longitude,
-            timestamp: initialLocation.timestamp,
-            accuracy: initialLocation.coords.accuracy,
-          },
-        ])
+      // Create the initial coordinate
+      const initialCoord = {
+        latitude: initialLocation.coords.latitude,
+        longitude: initialLocation.coords.longitude,
+        timestamp: initialLocation.timestamp,
+        accuracy: initialLocation.coords.accuracy,
       }
+
+      // Store the initial coordinate in the ref for future distance calculations
+      lastCoordinateRef.current = initialCoord
+
+      // Always start with just the initial location point for new activities
+      setCoordinates([initialCoord])
 
       lastCoordinateForStepsRef.current = {
         latitude: initialLocation.coords.latitude,
@@ -627,8 +826,28 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
       lowAccuracyCountRef.current = 0
       rawCoordinatesRef.current = []
 
+      // Reset the pace history when starting a new activity
+      recentPacesRef.current = []
+      setSmoothedPace(0)
+
       setTracking(true)
       setFollowingSuggestedRoute(followingSuggestedRoute) // Retain state
+
+      // Reset stats when starting a new tracking session
+      // Ensure all values are proper numbers
+      setStats({
+        distance: 0,
+        duration: 0,
+        pace: 0,
+        rawPace: 0,
+        avgSpeed: 0,
+        steps: 0,
+      })
+
+      // Debug log
+      console.log("Starting tracking with reset stats")
+      console.log("Initial coordinate set:", initialCoord)
+      console.log(`Pace window size: ${paceWindowSizeRef.current} for ${activityType}`)
 
       intervalRef.current = setInterval(() => {
         setStats((prev) => {
@@ -659,6 +878,8 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
         setUsingEstimatedSteps(true)
       }
 
+      // Find the location update handler in the startTracking function and replace it with this improved version:
+
       const id = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.BestForNavigation,
@@ -667,6 +888,12 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
         },
         (location) => {
           const { latitude, longitude, accuracy, speed, altitude } = location.coords
+
+          // Log location updates for debugging
+          console.log(
+            `Location update: lat=${latitude.toFixed(6)}, lng=${longitude.toFixed(6)}, acc=${accuracy.toFixed(1)}m`,
+          )
+
           if (accuracy > 50 || speed > maxSpeed) {
             lowAccuracyCountRef.current += 1
             if (lowAccuracyCountRef.current >= 5) {
@@ -674,6 +901,7 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
             }
             return
           }
+
           lowAccuracyCountRef.current = 0
           if (accuracy > 30) {
             setGpsSignal("Fair")
@@ -690,6 +918,7 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
             timestamp: location.timestamp,
             altitude,
           }
+
           rawCoordinatesRef.current.push(newCoordinate)
           if (rawCoordinatesRef.current.length > 5) rawCoordinatesRef.current.shift()
 
@@ -701,47 +930,84 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
             latitudeDelta: 0.005,
             longitudeDelta: 0.005,
           }
+
           setCurrentLocation(newRegion)
-          setCoordinates((prev) => [...prev, smoothedCoordinate])
 
-          setStats((prevStats) => {
-            const lastPoint = coordinates[coordinates.length - 1]
-            if (!lastPoint) return prevStats
+          // Get the previous coordinate from our ref
+          const lastCoord = lastCoordinateRef.current
 
+          // If we have a previous coordinate, calculate distance
+          if (lastCoord) {
+            // Calculate distance increment between last point and new point
             const distanceIncrement = calculateDistance(
-              lastPoint.latitude,
-              lastPoint.longitude,
+              lastCoord.latitude,
+              lastCoord.longitude,
               smoothedCoordinate.latitude,
               smoothedCoordinate.longitude,
             )
 
-            const newDistance = prevStats.distance + distanceIncrement
-            const duration = Math.floor((new Date() - startTimeRef.current) / 1000)
-            const metrics = calculateMetrics(newDistance, duration)
+            // Log the raw distance increment for debugging
+            console.log(`Raw distance increment: ${distanceIncrement.toFixed(2)}m from previous point`)
 
-            let updatedSteps = prevStats.steps
-            if (usingEstimatedSteps && activityType !== "cycling") {
-              updatedSteps = estimateStepsFromGPS(
-                { ...smoothedCoordinate, timestamp: location.timestamp, altitude },
-                lastCoordinateForStepsRef.current,
-                prevStats,
+            // Apply distance threshold to filter out GPS jitter
+            const filteredIncrement = distanceIncrement >= distanceThreshold ? distanceIncrement : 0
+
+            if (filteredIncrement === 0 && distanceIncrement > 0) {
+              console.log(
+                `Filtered out small movement (${distanceIncrement.toFixed(2)}m < ${distanceThreshold}m threshold)`,
               )
-              lastCoordinateForStepsRef.current = {
-                latitude: smoothedCoordinate.latitude,
-                longitude: smoothedCoordinate.longitude,
-                timestamp: location.timestamp,
-                altitude,
-              }
             }
 
-            return {
-              ...prevStats,
-              distance: newDistance,
-              duration,
-              ...metrics,
-              steps: updatedSteps,
-            }
-          })
+            // Update stats with new distance and pace
+            setStats((prevStats) => {
+              // Ensure we're working with numbers
+              const newDistance = Number(prevStats.distance) + Number(filteredIncrement)
+              const duration = Math.floor((new Date() - startTimeRef.current) / 1000)
+
+              // Calculate metrics based on new distance and duration
+              const metrics = calculateMetrics(newDistance, duration)
+
+              if (filteredIncrement > 0) {
+                console.log(
+                  `Updated stats: distance=${newDistance.toFixed(2)}m, duration=${duration}s, raw pace=${metrics.rawPace?.toFixed(2)}, smoothed pace=${metrics.pace?.toFixed(2)}`,
+                )
+              }
+
+              let updatedSteps = prevStats.steps
+              if (usingEstimatedSteps && activityType !== "cycling") {
+                // Only estimate steps for movements that exceed the threshold
+                if (filteredIncrement > 0) {
+                  updatedSteps = estimateStepsFromGPS(
+                    { ...smoothedCoordinate, timestamp: location.timestamp, altitude },
+                    lastCoordinateForStepsRef.current,
+                    prevStats,
+                  )
+                  lastCoordinateForStepsRef.current = {
+                    latitude: smoothedCoordinate.latitude,
+                    longitude: smoothedCoordinate.longitude,
+                    timestamp: location.timestamp,
+                    altitude,
+                  }
+                }
+              }
+
+              return {
+                ...prevStats,
+                distance: newDistance,
+                duration,
+                ...metrics,
+                steps: updatedSteps,
+              }
+            })
+          } else {
+            console.log("No previous coordinate available for distance calculation")
+          }
+
+          // Update the coordinates array with the new point
+          setCoordinates((prev) => [...prev, smoothedCoordinate])
+
+          // Update our ref with the current coordinate for next calculation
+          lastCoordinateRef.current = smoothedCoordinate
         },
       )
       setWatchId(id)
@@ -809,6 +1075,18 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
       const user = auth.currentUser
       if (!user) {
         showModal("Error", "You must be logged in to save activities.")
+        setIsTrackingLoading(false)
+        return
+      }
+
+      // Add validation to prevent saving activities with minimal distance/duration
+      if (stats.distance < 10) {
+        // Less than 10 meters
+        showModal(
+          "Activity Too Short",
+          "Your activity was too short to save. Please track a longer distance.",
+          navigateToActivity,
+        )
         setIsTrackingLoading(false)
         return
       }
@@ -912,39 +1190,43 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
       />
 
       {/* Header */}
-      <View style={twrnc`flex-row items-center justify-between p-4 bg-[${currentActivity.color}]`}>
-        <TouchableOpacity
-          onPress={returnToActivity}
-          hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-          disabled={isTrackingLoading}
+      <Animated.View style={[twrnc`z-10`, { transform: [{ translateY: headerSlideAnim }], opacity: fadeAnim }]}>
+        <LinearGradient
+          colors={[currentActivity.color, currentActivity.darkColor]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={twrnc`flex-row items-center justify-between p-4 rounded-b-2xl`}
         >
-          <Icon
-            name="angle-left"
-            size={isSmallDevice ? 24 : 28}
-            color="#FFFFFF"
-            style={twrnc`${isAndroid ? "mt-1" : ""}`}
-          />
-        </TouchableOpacity>
+          <TouchableOpacity
+            onPress={returnToActivity}
+            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+            disabled={isTrackingLoading}
+            style={twrnc`p-2`}
+          >
+            <Icon name="angle-left" size={isSmallDevice ? 24 : 28} color="#FFFFFF" />
+          </TouchableOpacity>
 
-        <View style={twrnc`flex-row items-center`}>
-          {activeQuest && (
-            <View style={twrnc`bg-white bg-opacity-20 rounded-full p-1 mr-2`}>
-              <FontAwesome name="trophy" size={isSmallDevice ? 14 : 16} color="#FFD166" />
-            </View>
-          )}
-          <CustomText weight="semibold" style={twrnc`text-white ${isSmallDevice ? "text-lg" : "text-xl"}`}>
-            {activeQuest ? activeQuest.title : activityType.charAt(0).toUpperCase() + activityType.slice(1)}
-          </CustomText>
-        </View>
+          <View style={twrnc`flex-row items-center`}>
+            {activeQuest && (
+              <View style={twrnc`bg-white bg-opacity-20 rounded-full p-1 mr-2`}>
+                <FontAwesome name="trophy" size={isSmallDevice ? 14 : 16} color="#FFD166" />
+              </View>
+            )}
+            <CustomText weight="semibold" style={twrnc`text-white ${isSmallDevice ? "text-lg" : "text-xl"}`}>
+              {activeQuest ? activeQuest.title : activityType.charAt(0).toUpperCase() + activityType.slice(1)}
+            </CustomText>
+          </View>
 
-        <TouchableOpacity
-          onPress={centerMap}
-          hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-          disabled={isTrackingLoading}
-        >
-          <FontAwesome name="compass" size={isSmallDevice ? 20 : 24} color="#fff" />
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            onPress={centerMap}
+            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+            disabled={isTrackingLoading}
+            style={twrnc`p-2`}
+          >
+            <FontAwesome name="compass" size={isSmallDevice ? 20 : 24} color="#fff" />
+          </TouchableOpacity>
+        </LinearGradient>
+      </Animated.View>
 
       {/* Map View */}
       <MapView
@@ -985,8 +1267,15 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
               longitude: currentLocation.longitude,
             }}
           >
-            <View style={twrnc`bg-[${currentActivity.color}] p-2 rounded-full border-2 border-white`}>
-              <Ionicons name={currentActivity.icon} size={16} color="white" />
+            <View style={twrnc`items-center`}>
+              <View
+                style={twrnc`bg-[${currentActivity.color}] p-2 rounded-full border-2 border-white items-center justify-center`}
+              >
+                <Ionicons name={currentActivity.icon} size={16} color="white" />
+              </View>
+              <View
+                style={twrnc`w-0 h-0 border-l-8 border-r-8 border-t-8 border-l-transparent border-r-transparent border-t-white -mt-0.5`}
+              />
             </View>
           </Marker>
         )}
@@ -1037,21 +1326,24 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
                 title={waypoint.name}
                 description={waypoint.type}
               >
-                <View
-                  style={twrnc`p-2 rounded-full border-2 border-white ${
-                    waypoint.type === "start" ? "bg-green-500" :
-                    waypoint.type === "end" ? "bg-red-500" :
-                    "bg-blue-500"
-                  }`}
-                >
-                  <FontAwesome
-                    name={
-                      waypoint.type === "start" ? "play" :
-                      waypoint.type === "end" ? "stop" :
-                      "map-marker"
-                    }
-                    size={16}
-                    color="white"
+                <View style={twrnc`items-center`}>
+                  <View
+                    style={twrnc`p-2 rounded-full border-2 border-white ${
+                      waypoint.type === "start"
+                        ? "bg-green-500"
+                        : waypoint.type === "end"
+                          ? "bg-red-500"
+                          : "bg-blue-500"
+                    }`}
+                  >
+                    <FontAwesome
+                      name={waypoint.type === "start" ? "play" : waypoint.type === "end" ? "stop" : "map-marker"}
+                      size={16}
+                      color="white"
+                    />
+                  </View>
+                  <View
+                    style={twrnc`w-0 h-0 border-l-8 border-r-8 border-t-8 border-l-transparent border-r-transparent border-t-white -mt-0.5`}
                   />
                 </View>
               </Marker>
@@ -1073,13 +1365,23 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
             {coordinates.length > 1 && !followingSuggestedRoute && (
               <>
                 <Marker coordinate={coordinates[0]}>
-                  <View style={twrnc`bg-green-500 p-2 rounded-full`}>
-                    <FontAwesome name="flag" size={16} color="white" />
+                  <View style={twrnc`items-center`}>
+                    <View style={twrnc`bg-green-500 p-2 rounded-full border-2 border-white`}>
+                      <FontAwesome name="flag" size={16} color="white" />
+                    </View>
+                    <View
+                      style={twrnc`w-0 h-0 border-l-8 border-r-8 border-t-8 border-l-transparent border-r-transparent border-t-white -mt-0.5`}
+                    />
                   </View>
                 </Marker>
                 <Marker coordinate={coordinates[coordinates.length - 1]}>
-                  <View style={twrnc`bg-red-500 p-2 rounded-full`}>
-                    <FontAwesome name="flag" size={16} color="white" />
+                  <View style={twrnc`items-center`}>
+                    <View style={twrnc`bg-red-500 p-2 rounded-full border-2 border-white`}>
+                      <FontAwesome name="flag" size={16} color="white" />
+                    </View>
+                    <View
+                      style={twrnc`w-0 h-0 border-l-8 border-r-8 border-t-8 border-l-transparent border-r-transparent border-t-white -mt-0.5`}
+                    />
                   </View>
                 </Marker>
               </>
@@ -1090,25 +1392,54 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
 
       {/* Route generation button */}
       {!tracking && !showSuggestedRoute && (
-        <View style={twrnc`absolute top-16 right-4`}>
+        <Animated.View
+          style={{
+            position: "absolute",
+            top: 80,
+            right: 16,
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+            zIndex: 10,
+          }}
+        >
           <TouchableOpacity
-            style={twrnc`bg-[${currentActivity.color}] p-3 rounded-full shadow-lg ${isAndroid ? "elevation-5" : ""}`}
+            style={twrnc`shadow-lg ${isAndroid ? "elevation-5" : ""}`}
             onPress={handleGenerateRoute}
             disabled={isGeneratingRoute || !currentLocation}
           >
-            {isGeneratingRoute ? (
-              <ActivityIndicator size="small" color="white" />
-            ) : (
-              <FontAwesome name="map" size={20} color="white" />
-            )}
+            <LinearGradient
+              colors={[currentActivity.color, currentActivity.darkColor]}
+              style={twrnc`w-12 h-12 rounded-full items-center justify-center border-2 border-white`}
+            >
+              {isGeneratingRoute ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <FontAwesome name="map" size={20} color="white" />
+              )}
+            </LinearGradient>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
       )}
 
       {/* Route info panel */}
       {showSuggestedRoute && suggestedRoute && !tracking && (
-        <View style={twrnc`absolute top-16 left-4 right-4`}>
-          <View style={twrnc`bg-[#2A2E3A] bg-opacity-90 rounded-xl p-3 shadow-lg ${isAndroid ? "elevation-5" : ""}`}>
+        <Animated.View
+          style={{
+            position: "absolute",
+            top: 80,
+            left: 16,
+            right: 16,
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+            zIndex: 10,
+          }}
+        >
+          <LinearGradient
+            colors={["#2A2E3A", "#1E2538"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={twrnc`p-3 rounded-xl shadow-lg ${isAndroid ? "elevation-5" : ""}`}
+          >
             <View style={twrnc`flex-row items-center justify-between`}>
               <View style={twrnc`flex-1`}>
                 <CustomText style={twrnc`text-white text-sm font-medium`}>{suggestedRoute.name}</CustomText>
@@ -1119,31 +1450,48 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
                   </CustomText>
                 </View>
               </View>
-              <TouchableOpacity onPress={clearSuggestedRoute}>
+              <TouchableOpacity onPress={clearSuggestedRoute} style={twrnc`bg-[#3A3F4B] p-2 rounded-full`}>
                 <FontAwesome name="times" size={18} color="#9CA3AF" />
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
+          </LinearGradient>
+        </Animated.View>
       )}
 
       {/* Quest indicator */}
       {activeQuest && !tracking && (
-        <View style={twrnc`absolute top-${showSuggestedRoute ? "32" : "16"} left-4 right-4`}>
-          <View style={twrnc`bg-[#2A2E3A] bg-opacity-90 rounded-xl p-3 shadow-lg ${isAndroid ? "elevation-5" : ""}`}>
+        <Animated.View
+          style={{
+            position: "absolute",
+            top: showSuggestedRoute ? 150 : 80,
+            left: 16,
+            right: 16,
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+            zIndex: 10,
+          }}
+        >
+          <LinearGradient
+            colors={["#4361EE", "#3A0CA3"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={twrnc`p-3 rounded-xl shadow-lg ${isAndroid ? "elevation-5" : ""}`}
+          >
             <View style={twrnc`flex-row items-center`}>
-              <FontAwesome name="trophy" size={18} color="#FFD166" style={twrnc`mr-2`} />
+              <View style={twrnc`bg-white bg-opacity-20 rounded-full p-2 mr-3`}>
+                <FontAwesome name="trophy" size={18} color="#FFD166" />
+              </View>
               <View style={twrnc`flex-1`}>
                 <CustomText style={twrnc`text-white text-sm font-medium`}>Quest: {activeQuest.title}</CustomText>
                 <View style={twrnc`flex-row items-center mt-1`}>
                   <View style={twrnc`flex-1 h-1.5 bg-[#3A3F4B] rounded-full mr-2`}>
                     <View
-                      style={[
-                        twrnc`h-1.5 rounded-full bg-[#FFD166]`,
-                        {
-                          width: `${Math.min(((activeQuest.unit === "steps" ? stats.steps : stats.distance / 1000) / activeQuest.goal) * 100, 100)}%`,
-                        },
-                      ]}
+                      style={{
+                        height: 6,
+                        borderRadius: 3,
+                        backgroundColor: "#FFD166",
+                        width: `${Math.min(((activeQuest.unit === "steps" ? stats.steps : stats.distance / 1000) / activeQuest.goal) * 100, 100)}%`,
+                      }}
                     />
                   </View>
                   <CustomText style={twrnc`text-white text-xs`}>
@@ -1154,57 +1502,85 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
                 </View>
               </View>
             </View>
-          </View>
-        </View>
+          </LinearGradient>
+        </Animated.View>
       )}
 
-      {/* Stats & Controls */}
-      <View style={twrnc`absolute bottom-4 left-4 right-4`}>
-        <View style={twrnc`bg-[#2A2E3A] rounded-xl p-4 shadow-lg ${isAndroid ? "elevation-5" : ""}`}>
-          {/* GPS Signal */}
-          <View style={twrnc`flex-row items-center justify-center mb-2`}>
-            <FontAwesome
-              name="signal"
-              size={isSmallDevice ? 16 : 18}
-              color={
-                gpsSignal === "Excellent"
-                  ? "#22C55E"
-                  : gpsSignal === "Good"
-                    ? "#3B82F6"
-                    : gpsSignal === "Fair"
-                      ? "#F59E0B"
-                      : "#EF4444"
-              }
-            />
-            <CustomText style={twrnc`text-white ml-2 ${isSmallDevice ? "text-xs" : "text-sm"}`}>
-              GPS Signal: {gpsSignal}
-            </CustomText>
-          </View>
+      {/* Draggable GPS Signal Indicator */}
+      <Animated.View
+        style={{
+          position: "absolute",
+          transform: [{ translateX: pan.x }, { translateY: pan.y }],
+          zIndex: 20,
+        }}
+        {...panResponder.panHandlers}
+      >
+        <View style={twrnc`flex-row items-center bg-[#2A2E3A] bg-opacity-80 px-2.5 py-1.5 rounded-full shadow-md`}>
+          <FontAwesome
+            name="signal"
+            size={14}
+            color={
+              gpsSignal === "Excellent"
+                ? "#22C55E"
+                : gpsSignal === "Good"
+                  ? "#3B82F6"
+                  : gpsSignal === "Fair"
+                    ? "#F59E0B"
+                    : "#EF4444"
+            }
+          />
+          <CustomText style={twrnc`text-white ml-2 text-xs font-medium`}>GPS: {gpsSignal}</CustomText>
+          <View style={twrnc`ml-1 bg-gray-500 rounded-full h-1 w-1`} />
+        </View>
+      </Animated.View>
 
+      {/* Stats & Controls */}
+      <Animated.View
+        style={[
+          twrnc`absolute bottom-4 left-4 right-4`,
+          { opacity: fadeAnim, transform: [{ translateY: statsSlideAnim }], zIndex: 10 },
+        ]}
+      >
+        <LinearGradient
+          colors={["#2A2E3A", "#1E2538"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={twrnc`p-4 rounded-xl shadow-lg ${isAndroid ? "elevation-5" : ""}`}
+        >
           {/* Stats */}
-          <View style={twrnc`flex-row justify-between mb-3 flex-wrap`}>
+          <View style={twrnc`flex-row justify-between mb-4 flex-wrap`}>
             <View style={twrnc`items-center ${isSmallDevice ? "w-1/2 mb-2" : "w-1/4"}`}>
-              <CustomText style={twrnc`text-white ${isSmallDevice ? "text-xs" : "text-sm"} mb-1`}>Distance</CustomText>
+              <CustomText style={twrnc`text-gray-400 ${isSmallDevice ? "text-xs" : "text-sm"} mb-1`}>
+                Distance
+              </CustomText>
               <CustomText weight="bold" style={twrnc`text-white ${isSmallDevice ? "text-base" : "text-lg"}`}>
                 {(stats.distance / 1000).toFixed(2)} km
               </CustomText>
-              <CustomText style={twrnc`text-gray-400 ${isSmallDevice ? "text-2xs" : "text-xs"}`}>
-                Target: {targetDistance} km
-              </CustomText>
+              {targetDistance !== "0" && (
+                <CustomText style={twrnc`text-gray-400 ${isSmallDevice ? "text-2xs" : "text-xs"}`}>
+                  Target: {targetDistance} km
+                </CustomText>
+              )}
             </View>
             <View style={twrnc`items-center ${isSmallDevice ? "w-1/2 mb-2" : "w-1/4"}`}>
-              <CustomText style={twrnc`text-white ${isSmallDevice ? "text-xs" : "text-sm"} mb-1`}>Duration</CustomText>
+              <CustomText style={twrnc`text-gray-400 ${isSmallDevice ? "text-xs" : "text-sm"} mb-1`}>
+                Duration
+              </CustomText>
               <CustomText weight="bold" style={twrnc`text-white ${isSmallDevice ? "text-base" : "text-lg"}`}>
                 {formatTime(stats.duration)}
               </CustomText>
-              <CustomText style={twrnc`text-gray-400 ${isSmallDevice ? "text-2xs" : "text-xs"}`}>
-                Target: {targetTime} min
-              </CustomText>
+              {targetTime !== "0" && (
+                <CustomText style={twrnc`text-gray-400 ${isSmallDevice ? "text-2xs" : "text-xs"}`}>
+                  Target: {targetTime} min
+                </CustomText>
+              )}
             </View>
+            {/* Update the stats display in the render function to use formatPace */}
+            {/* Find the section where pace is displayed and update it: */}
             <View style={twrnc`items-center ${isSmallDevice ? "w-1/2 mb-2" : "w-1/4"}`}>
-              <CustomText style={twrnc`text-white ${isSmallDevice ? "text-xs" : "text-sm"} mb-1`}>Pace</CustomText>
+              <CustomText style={twrnc`text-gray-400 ${isSmallDevice ? "text-xs" : "text-sm"} mb-1`}>Pace</CustomText>
               <CustomText weight="bold" style={twrnc`text-white ${isSmallDevice ? "text-base" : "text-lg"}`}>
-                {formatTime(stats.pace)} /km
+                {formatPace(stats.pace)} /km
               </CustomText>
               <CustomText style={twrnc`text-gray-400 ${isSmallDevice ? "text-2xs" : "text-xs"}`}>
                 {stats.avgSpeed.toFixed(1)} km/h
@@ -1212,7 +1588,7 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
             </View>
             <View style={twrnc`items-center ${isSmallDevice ? "w-1/2 mb-2" : "w-1/4"}`}>
               <View style={twrnc`flex-row items-center`}>
-                <CustomText style={twrnc`text-white ${isSmallDevice ? "text-xs" : "text-sm"} mb-1`}>
+                <CustomText style={twrnc`text-gray-400 ${isSmallDevice ? "text-xs" : "text-sm"} mb-1`}>
                   {activityType === "walking" || activityType === "jogging" || activityType === "running"
                     ? "Steps"
                     : "GPS Signal"}
@@ -1244,7 +1620,7 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
           {/* Start / Stop Button */}
           <Animated.View style={{ transform: [{ scale: buttonScaleAnim }] }}>
             <TouchableOpacity
-              style={twrnc`py-3 rounded-lg items-center flex-row justify-center bg-[${tracking ? "#EF4444" : currentActivity.color}] ${
+              style={twrnc`py-3 rounded-lg items-center flex-row justify-center ${tracking ? "bg-[#EF4444]" : `bg-[${currentActivity.color}]`} ${
                 isAndroid ? "active:opacity-70" : ""
               } ${isTrackingLoading ? "opacity-50" : ""}`}
               activeOpacity={0.7}
@@ -1296,11 +1672,11 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
               </CustomText>
             </TouchableOpacity>
           </Animated.View>
-        </View>
-      </View>
+        </LinearGradient>
+      </Animated.View>
 
       {/* Google Maps Attribution */}
-      <View style={twrnc`absolute bottom-2 right-2`}>
+      <View style={twrnc`absolute bottom-2 right-2 z-10`}>
         <CustomText style={twrnc`text-gray-400 text-xs`}>Powered by Google Maps</CustomText>
       </View>
     </View>
@@ -1308,4 +1684,3 @@ const MapScreen = ({ navigateToActivity, navigateToDashboard, params = {} }) => 
 }
 
 export default MapScreen
-

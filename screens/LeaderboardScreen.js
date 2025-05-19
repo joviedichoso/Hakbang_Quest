@@ -116,16 +116,14 @@ const LeaderboardScreen = ({ navigateToDashboard }) => {
 
   const renderLeaderboardItem = ({ item, index }) => (
     <View
-      style={twrnc`flex-row items-center p-4 bg-[#2A2E3A] rounded-xl mb-2 mx-5 border ${
-        index < 3 ? 'border-[#FFC107]' : 'border-[#3A3F4B]'
-      }`}
+      style={twrnc`flex-row items-center p-4 bg-[#2A2E3A] rounded-xl mb-2 mx-5 border ${index < 3 ? 'border-[#FFC107]' : 'border-[#3A3F4B]'
+        }`}
     >
       <View style={twrnc`w-10 items-center`}>
         <CustomText
           weight="bold"
-          style={twrnc`text-white text-lg ${
-            index === 0 ? 'text-[#FFD700]' : index === 1 ? 'text-[#C0C0C0]' : index === 2 ? 'text-[#CD7F32]' : ''
-          }`}
+          style={twrnc`text-white text-lg ${index === 0 ? 'text-[#FFD700]' : index === 1 ? 'text-[#C0C0C0]' : index === 2 ? 'text-[#CD7F32]' : ''
+            }`}
         >
           {index + 1}
         </CustomText>
@@ -135,13 +133,13 @@ const LeaderboardScreen = ({ navigateToDashboard }) => {
           {item.username}
         </CustomText>
         <CustomText style={twrnc`text-gray-400 text-sm`}>
-          Distance: {(item.totalDistance).toFixed(1)} km
+          Distance: {(Number(item.totalDistance) || 0).toFixed(1)} km
         </CustomText>
         <CustomText style={twrnc`text-gray-400 text-sm`}>
-          Activities: {item.totalActivities}
+          Activities: {item.totalActivities || 0}
         </CustomText>
         <CustomText style={twrnc`text-gray-400 text-sm`}>
-          Longest Run: {(item.longestRun).toFixed(1)} km
+          Longest Run: {(Number(item.longestRun) || 0).toFixed(1)} km
         </CustomText>
       </View>
       {index < 3 && (
@@ -157,9 +155,8 @@ const LeaderboardScreen = ({ navigateToDashboard }) => {
   const renderMetricButton = (metric) => (
     <TouchableOpacity
       key={metric.id}
-      style={twrnc`flex-row items-center bg-[#3A3F4B] rounded-xl px-3 py-2 mx-1 ${
-        sortMetric === metric.id ? 'bg-[#4361EE]' : ''
-      }`}
+      style={twrnc`flex-row items-center bg-[#3A3F4B] rounded-xl px-3 py-2 mx-1 ${sortMetric === metric.id ? 'bg-[#4361EE]' : ''
+        }`}
       onPress={() => handleMetricChange(metric.id)}
     >
       <Icon name={metric.icon} size={16} color="#FFFFFF" style={twrnc`mr-2`} />

@@ -2,6 +2,7 @@
   "expo": {
     "name": "HakbangQuest",
     "slug": "HakbangQuest",
+    "owner": "jov_26",
     "version": "1.0.0",
     "icon": "./assets/image/icon.png",
     "assetBundlePatterns": [
@@ -32,11 +33,6 @@
         "googleMapsApiKey": "AIzaSyCFE6SuCoD7LQftBLIN34ChHr-F2gnyaEI"
       }
     },
-    "extra": {
-      "eas": {
-        "projectId": "a74f26e2-cc0c-4544-b860-af2692a8c3f8"
-      }
-    },
     "plugins": [
       "expo-font",
       "expo-web-browser"
@@ -45,6 +41,11 @@
       "image": "./assets/image/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "8ad4a991-d762-4c64-b1cf-11ed68c1f2c5"
+      }
     }
   }
 }
